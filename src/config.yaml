@@ -1,0 +1,6 @@
+options:
+  cert-fqdn:
+    type: string
+    default: ''
+    description: |
+      FQDN matching the iregex for the cert you wish to use in ACM.

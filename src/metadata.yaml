@@ -1,0 +1,18 @@
+name: aws-elb
+display-name: AWS-ELB
+summary: ELasticLoadBalancer automation for Juju charms.
+maintainer: James Beedy <jamesbeedy@gmail.com>
+description: |
+  This layer provides the AWS-ELB.
+tags:
+  - aws
+  - elb
+subordinate: true
+series:
+  - bionic
+requires:
+  aws:
+    interface: "aws-integration"
+  elb:
+    interface: "aws-elb"
+    scope: container
