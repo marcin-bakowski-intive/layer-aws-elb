@@ -72,7 +72,7 @@ def request_aws_elb_integration():
       'endpoint.aws.ready')
 @when_not('leadership.set.vpc_id')
 def set_vpc_id():
-    instance = describe_instance(leader_get('instance_id'))
+    instance = describe_instance(kv.get('instance_id'))
     leader_set(vpc_id=instance['Reservations'][0]['Instances'][0]['VpcId'])
 
 
