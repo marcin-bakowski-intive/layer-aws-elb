@@ -28,25 +28,33 @@ kv = unitdata.kv()
 
 
 @hook('start')
-@when_not('aws-elb.juju.started')
 def set_started_flag():
-    elb_uuid = os.getenv('JUJU_MODEL_UUID')[:7]
-    elb_name = 'juju-elb-{}'.format(elb_uuid)
-    kv.set('elb_name', elb_name)
     set_flag('aws-elb.juju.started')
 
 
+@when('aws-elb.juju.started',
+      'leadership.is_leader')
+@when_not('leadership.set.elb_name')
+def set_elb_name_to_leader(): 
+    elb_uuid = os.getenv('JUJU_MODEL_UUID')[:7]
+    elb_name = 'juju-elb-{}'.format(elb_uuid)
+    leader_set(elb_name=elb_name)
+
+
 @when('endpoint.aws.joined',
-      'aws-elb.juju.started')
+      'aws-elb.juju.started',
+      'leadership.set.elb_name')
 @when_not('aws-elb.cloud.request-sent')
 def request_aws_elb_integration():
     """Request AWS integration
     """
     status_set('maintenance', 'requesting cloud integration')
+    elb_name = leader_get('elb_name')
     cloud = endpoint_from_flag('endpoint.aws.joined')
-    cloud.tag_instance({'juju_elb': kv.get('elb_name')})
-    cloud.tag_instance_security_group({'juju_elb': kv.get('elb_name')})
-    cloud.tag_instance_subnet({'juju_elb': kv.get('elb_name')})
+    cloud.tag_instance({'juju_elb': elb_name})
+    cloud.tag_instance_security_group({'juju_elb': elb_name})
+    cloud.tag_instance_subnet({'juju_elb': elb_name})
+    cloud.enable_acm_fullaccess()
     cloud.enable_instance_inspection()
     cloud.enable_load_balancer_management()
     cloud.enable_network_management()
@@ -83,3 +91,6 @@ def initial_checks_for_fqdn_cert():
 def get_listener_port_from_application():
     leader_set(listener_port=endpoint_from_flag(
         'endpoint.aws-elb.available').list_unit_data()[0])
+
+
+
