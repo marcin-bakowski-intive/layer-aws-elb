@@ -20,6 +20,11 @@ from charms.reactive import (
 )
 
 from charms.layer.elb_aws import (
+    create_elb,
+    create_listener,
+    create_target_group,
+    create_security_group_and_rule,
+    describe_instance,
     get_cert_arn_for_fqdn,
 )
 
@@ -62,6 +67,14 @@ def request_aws_elb_integration():
     set_state('pdl-api.cloud.request-sent')
 
 
+@when('leadership.is_leader',
+      'endpoint.aws.ready')
+@when_not('leadership.set.vpc_id')
+def set_vpc_id():
+    instance = describe_instance(leader_get('instance_id'))
+    leader_set(vpc_id=instance['Reservations'][0]['Instances'][0]['VpcId'])
+
+
 @when('endpoint.aws.ready',
       'leadership.is_leader')
 @when_not('leadership.set.cert_arn')
@@ -93,4 +106,61 @@ def get_listener_port_from_application():
         'endpoint.aws-elb.available').list_unit_data()[0])
 
 
+@when('endpoint.member.joined',
+      'leadership.is_leader')
+def update_unitdata_kv():
+    """
+    This handler is ran whenever a peer is joined.
+    (all node types use this handler to coordinate peers)
+    """
 
+    peers = endpoint_from_flag('endpoint.member.joined').all_units
+    if len(peers) > 0 and \
+       len([peer._data['private-address']
+            for peer in peers if peer._data is not None]) > 0:
+        kv.set('peer-nodes',
+               [peer._data['private-address']
+                for peer in peers if peer._data is not None])
+        set_flag('init.elb')
+
+
+@when('init.elb',
+      'leadership.set.elb_name',
+      'leadership.set.cert_arn',
+      'leadership.set.vpc_id',
+      'leadership.is_leader')
+@when_not('leadership.set.elb_init')
+def init_elb():
+    """Create the ELB, TGT, SG, and Listeners"""
+
+    security_group_id = create_security_group_and_rule(
+        name="{}-sg".format(leader_get('elb_name')),
+        description="Juju created SG for {}".format(leader_get('elb_name'))
+    )
+
+    tgt_grp_arn = create_target_group(
+        name="{}-tgt".format(leader_get('elb_name')),
+        vpc_id=leader_get('vpc_id'),
+        port=5000,
+        health_check_path='/ping',
+    )['TargetGroups'][0]['TargetGroupArn']
+
+    leader_set(tgt_grp_arn=tgt_grp_arn)
+
+    elb_arn = create_elb(
+        elb_name=leader_get('elb_name'),
+        subnets=[],
+        [security_group_id]
+    )['LoadBalancers'][0]['LoadBalancerArn']
+
+    create_listener(leader_get('cert_arn'), elb_arn, tgt_grp_arn)
+    leader_set(elb_init=True)
+
+
+@when('endpoint.aws.ready',
+      'leadership.set.tgt_grp_arn',
+      'leadership.set.elb_init')
+@when_not('register.self')
+def register_with_tgt_grp():
+    register_target(leader_get('tgt_grp_arn'), kv.get('instance_id'))
+    status_set('active', "Target registered")

@@ -78,10 +78,10 @@ def create_target_group(name, vpc_id, protocol='HTTP', port=80, health_check_pat
     )
 
 
-def create_security_group_and_rule():
+def create_security_group_and_rule(name, description, vpc_id):
     sec_group = aws_resource("ec2").create_security_group(
-        GroupName=f'{elb_name}-sg',
-        Description=f'{elb_name} sec group',
+        GroupName=name,
+        Description=description,
         VpcId=vpc_id
     )
 
