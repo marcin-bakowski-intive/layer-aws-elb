@@ -92,19 +92,19 @@ def initial_checks_for_fqdn_cert():
                    "Need 'fqdn-cert' configured before we can continue")
         return
     else:
-        if get_cert_arn_for_fqdn(elb_cert_fqdn):
-            leader_set(cert_arn=get_cert_arn_for_fqdn(elb_cert_fqdn))
-        else:
+        if not get_cert_arn_for_fqdn(elb_cert_fqdn):
             status_set('blocked', "'fqdn-cert' not found in ACM")
             return
+        else:
+            leader_set(cert_arn=get_cert_arn_for_fqdn(elb_cert_fqdn))
 
 
 @when('leadership.is_leader',
       'endpoint.aws-elb.available')
 @when_not('leadership.set.listener_port')
 def get_listener_port_from_application():
-    port = endpoint_from_flag(
-        'endpoint.aws-elb.available').list_unit_data()[0]
+    endpoint = endpoint_from_flag('endpoint.aws-elb.available')
+    port = endpoint.list_unit_data()[0]
     leader_set(listener_port=port)
 
 
