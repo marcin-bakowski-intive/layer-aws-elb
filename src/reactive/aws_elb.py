@@ -103,12 +103,14 @@ def initial_checks_for_fqdn_cert():
       'endpoint.aws-elb.available')
 @when_not('leadership.set.listener_port')
 def get_listener_port_from_application():
-    leader_set(listener_port=endpoint_from_flag(
-        'endpoint.aws-elb.available').list_unit_data()[0])
+    port = endpoint_from_flag(
+        'endpoint.aws-elb.available').list_unit_data()[0]
+    leader_set(listener_port=port)
 
 
 @when('endpoint.member.joined',
       'leadership.is_leader')
+@when_not('elb.init')
 def update_unitdata_kv():
     """
     This handler is ran whenever a peer is joined.
@@ -122,15 +124,15 @@ def update_unitdata_kv():
         kv.set('peer-nodes',
                [peer._data['private-address']
                 for peer in peers if peer._data is not None])
-        set_flag('init.elb')
+        set_flag('elb.init')
 
 
-@when('init.elb',
+@when('elb.init',
       'leadership.set.elb_name',
       'leadership.set.cert_arn',
       'leadership.set.vpc_id',
       'leadership.is_leader')
-@when_not('leadership.set.elb_init')
+@when_not('leadership.set.tgt_grp_arn')
 def init_elb():
     """Create the ELB, TGT, SG, and Listeners"""
 
@@ -142,11 +144,9 @@ def init_elb():
     tgt_grp_arn = create_target_group(
         name="{}-tgt".format(leader_get('elb_name')),
         vpc_id=leader_get('vpc_id'),
-        port=5000,
+        port=int(leader_get('listener_port')),
         health_check_path='/ping',
     )['TargetGroups'][0]['TargetGroupArn']
-
-    leader_set(tgt_grp_arn=tgt_grp_arn)
 
     elb_arn = create_elb(
         elb_name=leader_get('elb_name'),
@@ -155,13 +155,19 @@ def init_elb():
     )['LoadBalancers'][0]['LoadBalancerArn']
 
     create_listener(leader_get('cert_arn'), elb_arn, tgt_grp_arn)
-    leader_set(elb_init=True)
+
+    status_set('active', "ELB, TGT, SG, and Listeners initialized")
+    leader_set(tgt_grp_arn=tgt_grp_arn)
 
 
 @when('endpoint.aws.ready',
-      'leadership.set.tgt_grp_arn',
-      'leadership.set.elb_init')
-@when_not('register.self')
+      'leadership.set.tgt_grp_arn')
+@when_not('target.registered')
 def register_with_tgt_grp():
+    """Every unit will run this code to register with the 
+    target group once the target group is created and the elb 
+    has been initialized in init_elb().
+    """
     register_target(leader_get('tgt_grp_arn'), kv.get('instance_id'))
     status_set('active', "Target registered")
+    set_flag('target.registered')
