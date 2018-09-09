@@ -26,6 +26,7 @@ from charms.layer.elb_aws import (
     create_security_group_and_rule,
     describe_instance,
     get_cert_arn_for_fqdn,
+    register_target,
 )
 
 
