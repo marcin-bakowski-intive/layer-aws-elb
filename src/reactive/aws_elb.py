@@ -214,7 +214,8 @@ def register_subsequent_targets():
 
     set_elb_subnets(
         elb_arn=leader_get('elb_arn'),
-        subnets=subnets
+        subnets=subnets,
+        region_name=leader_get('aws_region')
     )
 
     for unit_data in units_data:

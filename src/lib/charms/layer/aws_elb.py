@@ -116,7 +116,7 @@ def register_target(target_group_arn, instance_id, region_name):
         TargetGroupArn=target_group_arn,Targets=[{'Id': instance_id}])
 
 
-def set_elb_subnets(elb_arn, subnets):
+def set_elb_subnets(elb_arn, subnets, region_name):
     return aws('elbv2', region_name=region_name).set_subnets(
         LoadBalancerArn=elb_arn,
         Subnets=subnets
