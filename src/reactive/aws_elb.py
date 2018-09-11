@@ -25,7 +25,8 @@ from charms.layer.aws_elb import (
     create_security_group_and_rule,
     describe_instance,
     get_cert_arn_for_fqdn,
-    register_target
+    register_target,
+    set_elb_subnets
 )
 
 
@@ -180,6 +181,7 @@ def init_elb():
     )
     status_set('active', "ELB, TGT, SG, and Listeners initialized")
     leader_set(tgt_grp_arn=tgt_grp_arn)
+    leader_set(elb_arn=elb_arn)
 
 
 @when('endpoint.aws-elb.available',
@@ -187,7 +189,7 @@ def init_elb():
 @when_not('initial.targets.registered')
 def register_initial_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.available')
-    units_data = endpoint.list_unit_data() 
+    units_data = endpoint.list_unit_data()
     for unit_data in units_data:
         register_target(
            target_group_arn=leader_get('tgt_grp_arn'),
@@ -200,14 +202,28 @@ def register_initial_targets():
 @when('endpoint.aws-elb.changed')
 def register_subsequent_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.changed')
-    units_data = endpoint.list_unit_data() 
+    units_data = endpoint.list_unit_data()
+
+    instance_ids = [instance['instance_id'] for instance in units_data]
+    subnets = list(set([
+        describe_instance(
+            instance_id=instance,
+            region_name=leader_get('aws_region')
+        )['Reservations'][0]['Instances'][0]['SubnetId']
+        for instance in instance_ids]))
+
+    set_elb_subnets(
+        elb_arn=leader_get('elb_arn'),
+        subnets=subnets
+    )
+
     for unit_data in units_data:
         register_target(
            target_group_arn=leader_get('tgt_grp_arn'),
            instance_id=unit_data['instance_id'],
            region_name=leader_get('aws_region')
         )
-        status_set('maintenance',
-                   "Registering {} with tgt_grp".format(
+        status_set('active',
+                   "Registered {} with tgt_grp".format(
                        unit_data['instance_id']))
     clear_flag('endpoint.aws-elb.changed')
