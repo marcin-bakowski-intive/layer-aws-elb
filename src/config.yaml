@@ -4,8 +4,3 @@ options:
     default: ''
     description: |
       FQDN matching the iregex for the cert you wish to use in ACM.
-  aws-region:
-    type: string
-    default: ''
-    description: |
-      Default AWS region to end up in /root/.aws. Ex. 'us-west-2'
