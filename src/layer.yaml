@@ -2,5 +2,5 @@ includes:
   - 'layer:basic'
   - 'layer:leadership'
   - 'interface:aws-elb'
-  - 'interface:aws-integrator'
+  - 'interface:aws-integration'
 repo: 'https://github.com/omnivector-solutions/layer-aws-elb'
