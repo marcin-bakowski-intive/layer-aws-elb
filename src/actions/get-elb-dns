@@ -1,0 +1,13 @@
+#!/usr/local/sbin/charm-env python3
+
+from charmhelpers.core.hookenv import action_set
+
+from charms.leadership import leader_get
+from charms.reactive import is_flag_set
+
+
+if __name__ == "__main__":
+    if is_flag_set('leadership.set.elb_dns'):
+        action_set({'elb-dns': leader_get('elb_dns')})
+    else:
+        action_set({'elb-dns': not-yet-available})

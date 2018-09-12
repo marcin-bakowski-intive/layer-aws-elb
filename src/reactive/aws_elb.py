@@ -1,4 +1,5 @@
 import uuid
+from time import sleep
 
 from charmhelpers.core import unitdata
 from charmhelpers.core.hookenv import (
@@ -25,6 +26,8 @@ from charms.layer.aws_elb import (
     create_security_group_and_rule,
     describe_instance,
     get_cert_arn_for_fqdn,
+    get_elb_status,
+    get_elb_dns,
     register_target,
     set_elb_subnets
 )
@@ -72,7 +75,8 @@ def get_listener_port_from_endpoint():
 
 
 @when('leadership.is_leader',
-      'endpoint.aws-elb.changed')
+      'endpoint.aws-elb.changed',
+      'endpoint.aws.ready')
 @when_not('sufficient-units-available')
 def update_elb_when_units_join():
     endpoint = endpoint_from_flag('endpoint.aws-elb.changed')
@@ -125,7 +129,7 @@ def initial_checks_for_fqdn_cert():
     elb_cert_fqdn = config('cert-fqdn')
     if not elb_cert_fqdn:
         status_set('blocked',
-                   "Need 'fqdn-cert' configured before we can continue")
+                   "Need 'cert-fqdn' configured before we can continue")
         return
     else:
         cert_arn = get_cert_arn_for_fqdn(
@@ -133,7 +137,7 @@ def initial_checks_for_fqdn_cert():
             leader_get('aws_region')
         )
         if not cert_arn:
-            status_set('blocked', "'fqdn-cert' not found in ACM")
+            status_set('blocked', "'cert-fqdn' not found in ACM")
             return
         else:
             leader_set(cert_arn=cert_arn)
@@ -179,7 +183,12 @@ def init_elb():
         target_group_arn=tgt_grp_arn,
         region_name=leader_get('aws_region')
     )
+
+    status_set('waiting', "Waiting for ELB to become available...")
+    while get_elb_status(elb_arn, leader_get('aws_region')) != 'active':
+        sleep(1)
     status_set('active', "ELB, TGT, SG, and Listeners initialized")
+    leader_set(elb_dns=get_elb_dns(elb_arn, leader_get('aws_region')))
     leader_set(tgt_grp_arn=tgt_grp_arn)
     leader_set(elb_arn=elb_arn)
 
@@ -190,16 +199,19 @@ def init_elb():
 def register_initial_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.available')
     units_data = endpoint.list_unit_data()
+    status_set('maintenance', "Registering initial targets")
     for unit_data in units_data:
         register_target(
            target_group_arn=leader_get('tgt_grp_arn'),
            instance_id=unit_data['instance_id'],
            region_name=leader_get('aws_region')
         )
+    status_set('active', "Initial targets registered")
     set_flag('initial.targets.registered')
 
 
-@when('endpoint.aws-elb.changed')
+@when('endpoint.aws-elb.changed',
+      'leadership.set.tgt_grp_arn')
 def register_subsequent_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.changed')
     units_data = endpoint.list_unit_data()
@@ -227,4 +239,6 @@ def register_subsequent_targets():
         status_set('active',
                    "Registered {} with tgt_grp".format(
                        unit_data['instance_id']))
+
+    status_set('active', "Targets successfully registered")
     clear_flag('endpoint.aws-elb.changed')
