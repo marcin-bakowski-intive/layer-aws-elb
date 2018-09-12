@@ -29,7 +29,7 @@ from charms.layer.aws_elb import (
     get_elb_status,
     get_elb_dns,
     register_target,
-    set_elb_subnets
+    # set_elb_subnets
 )
 
 
@@ -62,6 +62,7 @@ def request_aws_enablement():
     cloud.enable_instance_inspection()
     cloud.enable_load_balancer_management()
     cloud.enable_network_management()
+    status_set('maintenance', 'Waiting for units to join')
     set_flag('aws-elb.cloud.request-sent')
 
 
@@ -75,6 +76,7 @@ def get_listener_port_from_endpoint():
 
 
 @when('leadership.is_leader',
+      'leadership.set.subnets'
       'endpoint.aws-elb.changed',
       'endpoint.aws.ready')
 @when_not('sufficient-units-available')
@@ -93,16 +95,16 @@ def update_elb_when_units_join():
             region_name=instance_region
         )['Reservations'][0]['Instances'][0]['VpcId']
 
-        instance_ids = [instance['instance_id'] for instance in units_data]
-        subnets = ",".join(
-            [describe_instance(
-                instance_id=instance,
-                region_name=instance_region
-            )['Reservations'][0]['Instances'][0]['SubnetId']
-             for instance in instance_ids])
+        #instance_ids = [instance['instance_id'] for instance in units_data]
+        #subnets = ",".join(
+        #    [describe_instance(
+        #        instance_id=instance,
+        #        region_name=instance_region
+        #    )['Reservations'][0]['Instances'][0]['SubnetId']
+        #     for instance in instance_ids])
         leader_set(aws_region=instance_region)
         leader_set(vpc_id=vpc_id)
-        leader_set(init_subnets=subnets)
+        leader_set(subnets=leader_get('subnets'))
         set_flag('sufficient-units-available')
     else:
         clear_flag('sufficient-units-available')
@@ -114,6 +116,22 @@ def update_elb_when_units_join():
 def set_blocked_on_insufficient_units():
     status_set('blocked', "Need >= 2 units for ELB")
     return
+
+
+@when('leadership.is_leader')
+@when_not('leadership.set.subnets')
+def initial_checks_for_subnet_config():
+    """Set blocked status if we dont have subnet config.
+    We need a set of subnets with IGW routing tables.
+    """
+
+    subnets = config('subnets')
+    if not subnets:
+        status_set('blocked',
+                   "Need 'subnets' cofigured to proceed")
+        return
+    else:
+        leader_set(subnets=subnets)
 
 
 @when('endpoint.aws.ready',
@@ -148,7 +166,7 @@ def initial_checks_for_fqdn_cert():
       'leadership.set.cert_arn',
       'leadership.set.listener_port',
       'leadership.set.vpc_id',
-      'leadership.set.init_subnets',
+      'leadership.set.subnets',
       'leadership.is_leader',
       'sufficient-units-available')
 @when_not('leadership.set.tgt_grp_arn')
@@ -172,7 +190,7 @@ def init_elb():
 
     elb_arn = create_elb(
         name=leader_get('elb_name'),
-        subnets=leader_get('init_subnets').split(","),
+        subnets=leader_get('subnets').split(","),
         security_groups=[security_group_id],
         region_name=leader_get('aws_region')
     )['LoadBalancers'][0]['LoadBalancerArn']
@@ -216,19 +234,19 @@ def register_subsequent_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.changed')
     units_data = endpoint.list_unit_data()
 
-    instance_ids = [instance['instance_id'] for instance in units_data]
-    subnets = list(set([
-        describe_instance(
-            instance_id=instance,
-            region_name=leader_get('aws_region')
-        )['Reservations'][0]['Instances'][0]['SubnetId']
-        for instance in instance_ids]))
+    # instance_ids = [instance['instance_id'] for instance in units_data]
+    # subnets = list(set([
+    #    describe_instance(
+    #        instance_id=instance,
+    #        region_name=leader_get('aws_region')
+    #    )['Reservations'][0]['Instances'][0]['SubnetId']
+    #    for instance in instance_ids]))
 
-    set_elb_subnets(
-        elb_arn=leader_get('elb_arn'),
-        subnets=subnets,
-        region_name=leader_get('aws_region')
-    )
+    # set_elb_subnets(
+    #    elb_arn=leader_get('elb_arn'),
+    #    subnets=subnets,
+    #    region_name=leader_get('aws_region')
+    # )
 
     for unit_data in units_data:
         register_target(

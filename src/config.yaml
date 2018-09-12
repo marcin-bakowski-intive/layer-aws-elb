@@ -4,3 +4,9 @@ options:
     default: ''
     description: |
       FQDN matching the iregex for the cert you wish to use in ACM.
+  subnets:
+    type: string
+    default: ''
+    description: |
+      Comma separated list of subnet-ids to use for ELB provisioning.
+      
