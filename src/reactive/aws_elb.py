@@ -206,7 +206,7 @@ def register_initial_targets():
            instance_id=unit_data['instance_id'],
            region_name=leader_get('aws_region')
         )
-    status_set('active', "Initial targets registered")
+    status_set('active', "{} available".format(leader_get('elb_name')))
     set_flag('initial.targets.registered')
 
 
@@ -240,5 +240,5 @@ def register_subsequent_targets():
                    "Registered {} with tgt_grp".format(
                        unit_data['instance_id']))
 
-    status_set('active', "Targets successfully registered")
+    status_set('active', "{} available".format(leader_get('elb_name')))
     clear_flag('endpoint.aws-elb.changed')
