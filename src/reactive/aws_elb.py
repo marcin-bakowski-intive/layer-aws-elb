@@ -11,12 +11,13 @@ from charmhelpers.core.hookenv import (
 from charms.leadership import leader_get, leader_set
 
 from charms.reactive import (
+    clear_flag,
     endpoint_from_flag,
-    when,
     hook,
-    when_not,
     set_flag,
-    clear_flag
+    when,
+    when_any,
+    when_not,
 )
 
 from charms.layer.aws_elb import (
@@ -47,14 +48,28 @@ def set_started_flag():
 def set_elb_name_to_leader():
     elb_uuid = str(uuid.uuid4())[:7]
     elb_name = 'juju-elb-{}'.format(elb_uuid)
+    status_set('maintenance', "Configuring {}".format(elb_name))
     leader_set(elb_name=elb_name)
+
+
+@when_not('leadership.set.subnets')
+def block_on_no_subnets():
+    conf = config()
+    subnets = conf.get('subnets')
+    if not subnets:
+        status_set('blocked',
+                   "Need 'subnets' cofigured to proceed")
+        return
+    else:
+        status_set('maintenance', "Configuring subnets {}".format(subnets))
+        leader_set(subnets=subnets)
 
 
 @when('endpoint.aws.joined',
       'leadership.set.elb_name')
 @when_not('aws-elb.cloud.request-sent')
 def request_aws_enablement():
-    """Request AWS enablement
+    """Request AWS enablement for provisioning ELB
     """
     status_set('maintenance', 'requesting cloud integration')
     cloud = endpoint_from_flag('endpoint.aws.joined')
@@ -76,66 +91,26 @@ def get_listener_port_from_endpoint():
 
 
 @when('leadership.is_leader',
-      'leadership.set.subnets'
-      'endpoint.aws-elb.changed',
-      'endpoint.aws.ready')
-@when_not('sufficient-units-available')
-def update_elb_when_units_join():
-    endpoint = endpoint_from_flag('endpoint.aws-elb.changed')
+      'endpoint.aws.ready',
+      'endpoint.aws-elb.available')
+@when_not('leadership.set.vpc_id',
+          'leadership.set.aws_region')
+def get_instance_data_for_elb_init():
+    endpoint = endpoint_from_flag('endpoint.aws-elb.available')
     units_data = endpoint.list_unit_data()
 
-    for item in units_data:
-        log(item)
+    instance_region = units_data[0]['instance_region']
+    instance_id = units_data[0]['instance_id']
+    vpc_id = describe_instance(
+        instance_id=instance_id,
+        region_name=instance_region
+    )['Reservations'][0]['Instances'][0]['VpcId']
 
-    if len(units_data) > 1:
-        instance_region = units_data[0]['instance_region']
-        instance_id = units_data[0]['instance_id']
-        vpc_id = describe_instance(
-            instance_id=instance_id,
-            region_name=instance_region
-        )['Reservations'][0]['Instances'][0]['VpcId']
-
-        #instance_ids = [instance['instance_id'] for instance in units_data]
-        #subnets = ",".join(
-        #    [describe_instance(
-        #        instance_id=instance,
-        #        region_name=instance_region
-        #    )['Reservations'][0]['Instances'][0]['SubnetId']
-        #     for instance in instance_ids])
-        leader_set(aws_region=instance_region)
-        leader_set(vpc_id=vpc_id)
-        leader_set(subnets=leader_get('subnets'))
-        set_flag('sufficient-units-available')
-    else:
-        clear_flag('sufficient-units-available')
-    clear_flag('endpoint.aws-elb.changed')
+    leader_set(aws_region=instance_region)
+    leader_set(vpc_id=vpc_id)
 
 
-@when_not('sufficient-units-available')
-@when('endpoint.aws-elb.joined')
-def set_blocked_on_insufficient_units():
-    status_set('blocked', "Need >= 2 units for ELB")
-    return
-
-
-@when('leadership.is_leader')
-@when_not('leadership.set.subnets')
-def initial_checks_for_subnet_config():
-    """Set blocked status if we dont have subnet config.
-    We need a set of subnets with IGW routing tables.
-    """
-
-    subnets = config('subnets')
-    if not subnets:
-        status_set('blocked',
-                   "Need 'subnets' cofigured to proceed")
-        return
-    else:
-        leader_set(subnets=subnets)
-
-
-@when('endpoint.aws.ready',
-      'leadership.is_leader',
+@when('leadership.is_leader',
       'leadership.set.aws_region')
 @when_not('leadership.set.cert_arn')
 def initial_checks_for_fqdn_cert():
@@ -144,7 +119,8 @@ def initial_checks_for_fqdn_cert():
     in the ACM itself.
     """
 
-    elb_cert_fqdn = config('cert-fqdn')
+    conf = config()
+    elb_cert_fqdn = conf.get('cert-fqdn')
     if not elb_cert_fqdn:
         status_set('blocked',
                    "Need 'cert-fqdn' configured before we can continue")
@@ -167,8 +143,7 @@ def initial_checks_for_fqdn_cert():
       'leadership.set.listener_port',
       'leadership.set.vpc_id',
       'leadership.set.subnets',
-      'leadership.is_leader',
-      'sufficient-units-available')
+      'leadership.is_leader')
 @when_not('leadership.set.tgt_grp_arn')
 def init_elb():
     """Create the ELB, TGT, SG, and Listeners"""
@@ -234,20 +209,6 @@ def register_subsequent_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.changed')
     units_data = endpoint.list_unit_data()
 
-    # instance_ids = [instance['instance_id'] for instance in units_data]
-    # subnets = list(set([
-    #    describe_instance(
-    #        instance_id=instance,
-    #        region_name=leader_get('aws_region')
-    #    )['Reservations'][0]['Instances'][0]['SubnetId']
-    #    for instance in instance_ids]))
-
-    # set_elb_subnets(
-    #    elb_arn=leader_get('elb_arn'),
-    #    subnets=subnets,
-    #    region_name=leader_get('aws_region')
-    # )
-
     for unit_data in units_data:
         register_target(
            target_group_arn=leader_get('tgt_grp_arn'),
@@ -260,3 +221,9 @@ def register_subsequent_targets():
 
     status_set('active', "{} available".format(leader_get('elb_name')))
     clear_flag('endpoint.aws-elb.changed')
+
+
+@when_not('endpoint.aws-elb.joined')
+def block_on_no_elb_rel():
+    status_set('blocked', "Need relation to aws-elb provider to continue")
+    return

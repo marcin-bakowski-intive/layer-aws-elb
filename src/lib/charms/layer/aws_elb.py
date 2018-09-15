@@ -1,6 +1,7 @@
 import boto3
 import os
 
+
 def aws_resource(service, region_name=None):
     if os.getenv('AWS_ACCESS_KEY_ID') and \
        os.getenv('AWS_SECRET_ACCESS_KEY') and \
@@ -27,7 +28,6 @@ def aws(service, region_name=None):
         )
     else:
         return boto3.client(service, region_name=region_name)
-
 
 
 def create_elb(name, subnets, security_groups, region_name):
@@ -62,12 +62,12 @@ def create_target_group(name, vpc_id, region_name, protocol='HTTP', port=80,
     )
 
 
-def create_listener(cert_arn, load_balancer_arn, target_group_arn, region_name):
+def create_listener(cert_arn, load_balancer_arn,
+                    target_group_arn, region_name):
     return aws('elbv2', region_name).create_listener(
         LoadBalancerArn=load_balancer_arn,
         Protocol='HTTPS',
         Port=443,
-        #SslPolicy='string',
         Certificates=[
             {
                 'CertificateArn': cert_arn,
@@ -105,7 +105,10 @@ def describe_instance(instance_id, region_name):
 
 
 def get_cert_arn_for_fqdn(fqdn, region_name):
-    for cert in aws('acm', region_name=region_name).list_certificates()['CertificateSummaryList']:
+    for cert in aws(
+        'acm',
+        region_name=region_name
+    ).list_certificates()['CertificateSummaryList']:
         if fqdn == cert['DomainName']:
             return cert['CertificateArn']
     return None
@@ -125,7 +128,7 @@ def get_elb_dns(elb_arn, region_name):
 
 def register_target(target_group_arn, instance_id, region_name):
     return aws('elbv2', region_name=region_name).register_targets(
-        TargetGroupArn=target_group_arn,Targets=[{'Id': instance_id}])
+        TargetGroupArn=target_group_arn, Targets=[{'Id': instance_id}])
 
 
 def set_elb_subnets(elb_arn, subnets, region_name):
