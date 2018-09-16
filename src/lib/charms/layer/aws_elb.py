@@ -126,6 +126,14 @@ def get_elb_dns(elb_arn, region_name):
     )['LoadBalancers'][0]['DNSName']
 
 
+def get_targets_health(target_group_arn, region_name):
+    response = aws('elbv2', region_name=region_name).describe_target_health(
+        TargetGroupArn=target_group_arn
+    )
+    return [target_state['TargetHealth']['State']
+            for target_state in response['TargetHealthDescriptions']]
+
+
 def register_target(target_group_arn, instance_id, region_name):
     return aws('elbv2', region_name=region_name).register_targets(
         TargetGroupArn=target_group_arn, Targets=[{'Id': instance_id}])

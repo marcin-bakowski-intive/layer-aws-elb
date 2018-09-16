@@ -3,7 +3,6 @@ from time import sleep
 
 from charmhelpers.core import unitdata
 from charmhelpers.core.hookenv import (
-    log,
     config,
     status_set,
 )
@@ -16,7 +15,6 @@ from charms.reactive import (
     hook,
     set_flag,
     when,
-    when_any,
     when_not,
 )
 
@@ -28,9 +26,9 @@ from charms.layer.aws_elb import (
     describe_instance,
     get_cert_arn_for_fqdn,
     get_elb_status,
+    get_targets_health,
     get_elb_dns,
     register_target,
-    # set_elb_subnets
 )
 
 
@@ -221,6 +219,18 @@ def register_subsequent_targets():
 
     status_set('active', "{} available".format(leader_get('elb_name')))
     clear_flag('endpoint.aws-elb.changed')
+
+
+@when('initial.targets.registered')
+def targets_health_check_status():
+    target_statuses = get_targets_health(
+        target_group_arn=leader_get('tgt_grp_arn'),
+        region_name=leader_get('aws_region')
+    )
+    status_set('active',
+               "{} - {}".format(
+                   leader_get('elb_name'),
+                   str(list(set(target_statuses)))))
 
 
 @when_not('endpoint.aws-elb.joined')
