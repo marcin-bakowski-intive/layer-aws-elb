@@ -169,10 +169,13 @@ def get_elb_dns(elb_arn, region_name):
 
 
 def get_targets(target_group_arn, region_name):
-    targets = describe_target_group(target_group_arn, region_name)
-    if len(targets['TargetHealthDescriptions']) > 0:
-        return [target['Target']['Id'] for target
-                in targets['TargetHealthDescriptions']]
+    targets = describe_target_group(
+        target_group_arn,
+        region_name
+    )['TargetHealthDescriptions']
+
+    if len(targets) > 0:
+        return [target['Target']['Id'] for target in targets]
     else:
         return []
 
