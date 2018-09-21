@@ -99,16 +99,58 @@ def create_security_group_and_rule(name, description, vpc_id, region_name):
     return sec_group.id
 
 
+def delete_load_balancer(elb_arn, region_name):
+    return aws('elbv2', region_name).delete_load_balancer(
+         LoadBalancerArn=elb_arn
+    )
+
+
+def delete_target_group(target_group_arn, region_name):
+    return aws('elbv2', region_name).delete_target_group(
+         TargetGroupArn=target_group_arn
+    )
+
+
+def delete_listener(listener_arn, region_name):
+    return aws('elbv2', region_name).delete_listener(
+         ListenerArn=listener_arn
+    )
+
+
+def delete_security_group(security_group_id, region_name):
+    ec2 = aws_resource('ec2', region_name)
+    security_group = ec2.SecurityGroup(security_group_id)
+
+    try:
+        security_group.delete()
+    except Exception as e:
+        print(e)
+        print("{0} requires manual remediation.".format(
+            security_group.group_name))
+
+
 def describe_instance(instance_id, region_name):
     return aws('ec2', region_name=region_name).describe_instances(
-        InstanceIds=[instance_id])
+        InstanceIds=[instance_id]
+    )
+
+
+def deregister_targets(targets, target_group_arn, region_name):
+    aws('elbv2', region_name).deregister_targets(
+        TargetGroupArn=target_group_arn,
+        Targets=[{'Id': target} for target in targets],
+    )
+
+
+def describe_target_group(target_group_arn, region_name):
+    return aws('elbv2', region_name=region_name).describe_target_health(
+        TargetGroupArn=target_group_arn
+    )
 
 
 def get_cert_arn_for_fqdn(fqdn, region_name):
-    for cert in aws(
-        'acm',
-        region_name=region_name
-    ).list_certificates()['CertificateSummaryList']:
+    acm = aws('acm', region_name=region_name)
+    for cert in acm.list_certificates()['CertificateSummaryList']:
         if fqdn == cert['DomainName']:
             return cert['CertificateArn']
     return None
@@ -126,17 +168,43 @@ def get_elb_dns(elb_arn, region_name):
     )['LoadBalancers'][0]['DNSName']
 
 
+def get_targets(target_group_arn, region_name):
+    targets = describe_target_group(target_group_arn, region_name)
+    if len(targets['TargetHealthDescriptions']) > 0:
+        return [target['Target']['Id'] for target
+                in targets['TargetHealthDescriptions']]
+    else:
+        return []
+
+
 def get_targets_health(target_group_arn, region_name):
-    response = aws('elbv2', region_name=region_name).describe_target_health(
-        TargetGroupArn=target_group_arn
-    )
-    return [target_state['TargetHealth']['State']
-            for target_state in response['TargetHealthDescriptions']]
+    targets = describe_target_group(
+        target_group_arn,
+        region_name
+    )['TargetHealthDescriptions']
+
+    if len(targets) > 0:
+        return [target['Target']['TargetHealth']['State']
+                for target in targets]
+    else:
+        return []
+
+
+def get_elb_listener_arns(elb_arn, region_name):
+    listeners = aws('elbv2', region_name=region_name).describe_listeners(
+        LoadBalancerArn=elb_arn
+    )['Listeners']
+    if len(listeners) > 0:
+        return [listener['ListenerArn'] for listener in listeners]
+    else:
+        return []
 
 
 def register_target(target_group_arn, instance_id, region_name):
     return aws('elbv2', region_name=region_name).register_targets(
-        TargetGroupArn=target_group_arn, Targets=[{'Id': instance_id}])
+        TargetGroupArn=target_group_arn,
+        Targets=[{'Id': instance_id}]
+    )
 
 
 def set_elb_subnets(elb_arn, subnets, region_name):
