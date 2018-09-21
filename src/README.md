@@ -21,7 +21,7 @@ juju add-spaces nat 172.31.102.0/24 172.31.103.0/24 172.31.104.0/24
 # Deploy the 2 primary charms and the subordinate
 juju deploy cs:~containers/aws-integrator-5 --constraints "spaces=nat instance-type=m5.large"
 
-juju deploy cs:~omnivector/aws-elb-16
+juju deploy cs:~omnivector/aws-elb
 
 juju deploy cs:~jamesbeedy/flask-test-2 --constraints "spaces=nat instance-type=m5.large"
 juju expose flask-test
