@@ -176,6 +176,7 @@ def init_elb():
         name=elb_name,
         subnets=leader_get('subnets').split(","),
         security_groups=[security_group_id],
+        scheme=config('scheme'),
         region_name=leader_get('aws_region')
     )['LoadBalancers'][0]['LoadBalancerArn']
 

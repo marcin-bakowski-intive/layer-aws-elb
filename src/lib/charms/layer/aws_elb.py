@@ -30,12 +30,12 @@ def aws(service, region_name=None):
         return boto3.client(service, region_name=region_name)
 
 
-def create_elb(name, subnets, security_groups, region_name):
+def create_elb(name, subnets, security_groups, scheme, region_name):
     return aws('elbv2', region_name).create_load_balancer(
         Name=name,
         Subnets=subnets,
         SecurityGroups=security_groups,
-        Scheme='internet-facing',
+        Scheme=scheme,
         Type='application',
         IpAddressType='ipv4',
     )

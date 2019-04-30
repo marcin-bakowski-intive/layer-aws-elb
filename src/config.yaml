@@ -1,4 +1,10 @@
 options:
+  scheme:
+    type: string
+    default: "internet-facing"
+    description: |
+      Scheme to use for loadbalancer, 'internet-facing' or 'internal'.
+      Defaults to 'internet-facing'.
   cert-fqdn:
     type: string
     default: ""
