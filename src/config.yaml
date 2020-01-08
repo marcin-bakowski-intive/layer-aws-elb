@@ -15,4 +15,24 @@ options:
     default: ""
     description: |
       Comma separated list of subnet-ids to use for ELB provisioning.
-      
+  listener-tls-port:
+    type: int
+    default: 0
+    description: >-
+      Port on which the ELB should listen. (HTTPS or TLS on non-HTTP TCP)
+      Set to 0 to disable. One of listener-tls-port and
+      listener-raw-port must be set; both may be set in order to
+      accept both TLS and unencrypted traffic.
+  listener-raw-port:
+    type: int
+    default: 0
+    description: >-
+      Port on which the ELB should listen for non-TSL traffic. (HTTP, TCP, UDP)
+      Set to 0 to disable. One of listener-tls-port and
+      listener-raw-port must be set; both may be set in order to
+      accept both TLS and unencrypted traffic.
+  instance-protocol:
+    type: string
+    default: ""
+    description: >-
+      The protocol the instances speak: HTTP, TCP, UDP, TCP_UDP.

@@ -16,6 +16,7 @@ from charms.reactive import (
     hook,
     set_flag,
     when,
+    when_any,
     when_not,
 )
 
@@ -88,7 +89,10 @@ def request_aws_enablement():
 @when('leadership.is_leader',
       'endpoint.aws.ready',
       'endpoint.aws-elb.available')
-@when_not('leadership.set.listener_port',
+@when_not('leadership.set.listener_tls_port',
+          'leadership.set.listener_raw_port',
+          'leadership.set.instance_port',
+          'leadership.set.instance_protocol',
           'leadership.set.health_check_endpoint',
           'leadership.set.aws_region',
           'leadership.set.vpc_id')
@@ -103,8 +107,11 @@ def get_initial_data_from_endpoint():
                    "Something is wrong, no instances found on relation")
         return
 
+    conf = config()
+
     instance_id = units_data[0]['instance_id']
     instance_port = units_data[0]['instance_port']
+    instance_protocol = conf['instance-protocol']
     health_check_endpoint = units_data[0]['health_check_endpoint']
     instance_region = units_data[0]['instance_region']
 
@@ -115,8 +122,16 @@ def get_initial_data_from_endpoint():
 
     leader_set(aws_region=instance_region)
     leader_set(vpc_id=vpc_id)
-    leader_set(listener_port=instance_port)
+    leader_set(listener_tls_port=conf['listener-tls-port'])
+    leader_set(listener_raw_port=conf['listener-raw-port'])
+    leader_set(instance_port=instance_port)
+    leader_set(instance_protocol=instance_protocol)
     leader_set(health_check_endpoint=health_check_endpoint)
+
+    for port_type in ('tls', 'raw'):
+        port = conf.get('listener-{}-port'.format(port_type))
+        if port:
+            leader_set(**{'listener_{}_port'.format(port_type): port})
 
 
 @when('leadership.is_leader',
@@ -129,8 +144,13 @@ def initial_checks_for_fqdn_cert():
     """
 
     conf = config()
+    listener_raw_port = conf.get('listener-raw-port')
+    listener_tls_port = conf.get('listener-tls-port')
     elb_cert_fqdn = conf.get('cert-fqdn')
-    if not elb_cert_fqdn:
+    if listener_raw_port and not listener_tls_port:
+        # only non-TLS connectivity configured
+        leader_set(cert_arn='')
+    elif not elb_cert_fqdn:
         status_set('blocked',
                    "Need 'cert-fqdn' configured before we can continue")
         return
@@ -148,11 +168,12 @@ def initial_checks_for_fqdn_cert():
 
 @when('leadership.set.aws_region',
       'leadership.set.cert_arn',
-      'leadership.set.listener_port',
       'leadership.set.health_check_endpoint',
       'leadership.set.vpc_id',
       'leadership.set.subnets',
       'leadership.is_leader')
+@when_any('leadership.set.listener_tls_port',
+          'leadership.set.listener_raw_port')
 @when_not('leadership.set.tgt_grp_arn',
           'leadership.set.elb_name',
           'leadership.set.elb_arn',
@@ -166,35 +187,65 @@ def init_elb():
     elb_name = 'juju-elb-{}'.format(elb_uuid)
     status_set('maintenance', "Provisioning {}".format(elb_name))
 
-    security_group_id = create_security_group_and_rule(
-        name="{}-sg".format(elb_name),
-        description="Juju created SG for {}".format(elb_name),
-        region_name=leader_get('aws_region'),
-        vpc_id=leader_get('vpc_id')
-    )
+    ports = {
+        port_type: int(port)
+        for port_type in ('tls', 'raw')
+        for port in [leader_get('listener_{}_port'.format(port_type))]
+        if port and port.isdigit() and int(port)
+    }
+
+    instance_protocol = leader_get('instance_protocol').upper()
+    elb_type = 'application' if instance_protocol.startswith('HTTP') else 'network'
+
+    if elb_type == 'application':
+        security_group_id = create_security_group_and_rule(
+            name="{}-sg".format(elb_name),
+            description="Juju created SG for {}".format(elb_name),
+            region_name=leader_get('aws_region'),
+            vpc_id=leader_get('vpc_id'),
+            **ports,
+        )
+        security_groups = [security_group_id]
+    else:
+        security_group_id = ''
+        security_groups = []
 
     tgt_grp_arn = create_target_group(
         name="{}-tgt".format(elb_name),
         vpc_id=leader_get('vpc_id'),
         region_name=leader_get('aws_region'),
-        port=int(leader_get('listener_port')),
+        protocol=instance_protocol,
+        port=int(leader_get('instance_port')),
         health_check_path=leader_get('health_check_endpoint')
     )['TargetGroups'][0]['TargetGroupArn']
 
     elb_arn = create_elb(
         name=elb_name,
         subnets=leader_get('subnets').split(","),
-        security_groups=[security_group_id],
+        security_groups=security_groups,
         scheme=config('scheme'),
-        region_name=leader_get('aws_region')
+        region_name=leader_get('aws_region'),
+        elb_type=elb_type,
     )['LoadBalancers'][0]['LoadBalancerArn']
 
-    create_listener(
-        cert_arn=leader_get('cert_arn'),
-        load_balancer_arn=elb_arn,
-        target_group_arn=tgt_grp_arn,
-        region_name=leader_get('aws_region')
-    )
+    encrypted_counterpart = {
+        'HTTP': 'HTTPS',
+        'TCP': 'TLS',
+    }
+    for port_type, port in ports.items():
+        if port_type == 'tls':
+            protocol = encrypted_counterpart[instance_protocol.upper()]
+        else:
+            protocol = instance_protocol.upper()
+            assert protocol in {'HTTP', 'TCP', 'UDP', 'TCP_UDP'}
+        create_listener(
+            cert_arn=leader_get('cert_arn'),
+            load_balancer_arn=elb_arn,
+            target_group_arn=tgt_grp_arn,
+            region_name=leader_get('aws_region'),
+            protocol=protocol,
+            port=port,
+        )
 
     status_set('waiting',
                "Waiting for {} to become available...".format(elb_name))
@@ -304,7 +355,8 @@ def block_on_no_elb_rel():
       # 'leadership.set.elb_dns'
       # 'leadership.set.aws_region',
       # 'leadership.set.cert_arn',
-      # 'leadership.set.listener_port',
+      # 'leadership.set.listener_tls_port',
+      # 'leadership.set.listener_raw_port',
       # 'leadership.set.health_check_endpoint',
       # 'leadership.set.vpc_id',
       # 'leadership.set.subnets',
@@ -338,7 +390,8 @@ def remove_all_provisioned_aws_resources():
         aws_region
     )
 
-    delete_security_group(security_group_id, aws_region)
+    if security_group_id:
+        delete_security_group(security_group_id, aws_region)
 
     # Unset leader values
     leader_set(elb_name=None)
@@ -346,7 +399,8 @@ def remove_all_provisioned_aws_resources():
     leader_set(elb_dns=None)
     leader_set(aws_region=None)
     leader_set(cert_arn=None)
-    leader_set(listener_port=None)
+    leader_set(listener_tls_port=None)
+    leader_set(listener_raw_port=None)
     leader_set(health_check_endpoint=None)
     leader_set(vpc_id=None)
     leader_set(subnets=None)

@@ -30,49 +30,56 @@ def aws(service, region_name=None):
         return boto3.client(service, region_name=region_name)
 
 
-def create_elb(name, subnets, security_groups, scheme, region_name):
+def create_elb(name, subnets, security_groups, scheme, region_name,
+               elb_type='application'):
     return aws('elbv2', region_name).create_load_balancer(
         Name=name,
         Subnets=subnets,
         SecurityGroups=security_groups,
         Scheme=scheme,
-        Type='application',
+        Type=elb_type,
         IpAddressType='ipv4',
     )
 
 
 def create_target_group(name, vpc_id, region_name, protocol='HTTP', port=80,
                         health_check_path='/'):
-    return aws('elbv2', region_name).create_target_group(
+    args = dict(
         Name=name,
         Protocol=protocol,
         Port=port,
         VpcId=vpc_id,
         HealthCheckProtocol=protocol,
         HealthCheckPort=str(port),
-        HealthCheckPath=health_check_path,
-        HealthCheckIntervalSeconds=9,
-        HealthCheckTimeoutSeconds=3,
-        HealthyThresholdCount=9,
-        UnhealthyThresholdCount=9,
-        Matcher={
-            'HttpCode': '200'
-        },
-        TargetType='instance'
+        HealthCheckIntervalSeconds=30,
+        HealthCheckTimeoutSeconds=10,
+        TargetType='instance',
     )
+    if protocol.startswith('HTTP'):
+        args.update(dict(
+            HealthCheckPath=health_check_path,
+            HealthyThresholdCount=3,
+            UnhealthyThresholdCount=9,
+            Matcher={
+                'HttpCode': '200'
+            },
+        ))
+    else:
+        args.update(dict(
+            HealthyThresholdCount=2,
+            UnhealthyThresholdCount=2,
+        ))
+    return aws('elbv2', region_name).create_target_group(**args)
 
 
 def create_listener(cert_arn, load_balancer_arn,
-                    target_group_arn, region_name):
-    return aws('elbv2', region_name).create_listener(
+                    target_group_arn, region_name,
+                    protocol, port):
+    assert cert_arn if protocol.upper() in {'HTTPS', 'TLS'} else protocol.upper() in {'HTTP', 'TCP', 'UDP', 'TCP_UDP'}
+    args = dict(
         LoadBalancerArn=load_balancer_arn,
-        Protocol='HTTPS',
-        Port=443,
-        Certificates=[
-            {
-                'CertificateArn': cert_arn,
-            },
-        ],
+        Protocol=protocol.upper(),
+        Port=port,
         DefaultActions=[
             {
                 'Type': 'forward',
@@ -80,9 +87,16 @@ def create_listener(cert_arn, load_balancer_arn,
             },
         ]
     )
+    if cert_arn:
+        args['Certificates'] = [
+            {
+                'CertificateArn': cert_arn,
+            },
+        ]
+    return aws('elbv2', region_name).create_listener(**args)
 
 
-def create_security_group_and_rule(name, description, vpc_id, region_name):
+def create_security_group_and_rule(name, description, vpc_id, region_name, **ports):
     sec_group = \
         aws_resource("ec2", region_name=region_name).create_security_group(
             GroupName=name,
@@ -90,12 +104,13 @@ def create_security_group_and_rule(name, description, vpc_id, region_name):
             VpcId=vpc_id
         )
 
-    sec_group.authorize_ingress(
-        CidrIp='0.0.0.0/0',
-        IpProtocol='tcp',
-        FromPort=443,
-        ToPort=443
-    )
+    for port in ports.values():
+        sec_group.authorize_ingress(
+            CidrIp='0.0.0.0/0',
+            IpProtocol='tcp',
+            FromPort=port,
+            ToPort=port
+        )
     return sec_group.id
 
 
