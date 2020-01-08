@@ -187,10 +187,22 @@ def get_targets_health(target_group_arn, region_name):
     )['TargetHealthDescriptions']
 
     if len(targets) > 0:
-        return [target['Target']['TargetHealth']['State']
+        return [target['TargetHealth']['State']
                 for target in targets]
     else:
         return []
+
+
+def get_health_by_target(target_group_arn, region_name):
+    targets = describe_target_group(
+        target_group_arn,
+        region_name
+    )['TargetHealthDescriptions']
+
+    return {
+        target['Target']['Id']: target['TargetHealth']['State']
+        for target in targets
+    }
 
 
 def get_elb_listener_arns(elb_arn, region_name):

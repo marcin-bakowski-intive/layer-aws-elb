@@ -3,6 +3,7 @@ from time import sleep
 
 from charmhelpers.core import unitdata
 from charmhelpers.core.hookenv import (
+    atexit,
     config,
     status_set,
 )
@@ -33,6 +34,7 @@ from charms.layer.aws_elb import (
     get_elb_dns,
     get_elb_listener_arns,
     get_elb_status,
+    get_health_by_target,
     get_targets,
     get_targets_health,
     register_target,
@@ -45,6 +47,13 @@ kv = unitdata.kv()
 @hook('start')
 def set_started_flag():
     set_flag('aws-elb.juju.started')
+
+
+@hook('update-status')
+def update_status():
+    """Set the update-status flag during the update-status hook."""
+    set_flag('update-status')
+    atexit(clear_flag, 'update-status')
 
 
 @when_not('leadership.set.subnets')
@@ -220,6 +229,7 @@ def register_initial_targets():
         )
     status_set('active', "{} available".format(leader_get('elb_name')))
     set_flag('initial.targets.registered')
+    update_target_health(endpoint)
 
 
 @when('endpoint.aws-elb.changed',
@@ -240,6 +250,17 @@ def register_subsequent_targets():
 
     status_set('active', "{} available".format(leader_get('elb_name')))
     clear_flag('endpoint.aws-elb.changed')
+    update_target_health(endpoint)
+
+
+def update_target_health(endpoint):
+    endpoint.publish_dns_and_health(
+        elb_dns=leader_get('elb_dns'),
+        health_by_target=get_health_by_target(
+            target_group_arn=leader_get('tgt_grp_arn'),
+            region_name=leader_get('aws_region'),
+        ),
+    )
 
 
 @when('initial.targets.registered',
@@ -253,6 +274,8 @@ def targets_health_check_status():
                "{} - {}".format(
                    leader_get('elb_name'),
                    str(list(set(target_statuses)))))
+    endpoint = endpoint_from_flag('endpoint.aws-elb.available')
+    update_target_health(endpoint)
 
 
 @when('endpoint.aws.ready')
