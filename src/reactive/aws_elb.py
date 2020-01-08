@@ -238,15 +238,28 @@ def register_subsequent_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.changed')
     units_data = endpoint.list_unit_data()
 
+    unmatched_targets = set(get_targets(
+        target_group_arn=leader_get('tgt_grp_arn'),
+        region_name=leader_get('aws_region')
+    ))
+
     for unit_data in units_data:
         register_target(
            target_group_arn=leader_get('tgt_grp_arn'),
            instance_id=unit_data['instance_id'],
            region_name=leader_get('aws_region')
         )
+        unmatched_targets.discard(unit_data['instance_id'])
         status_set('active',
                    "Registered {} with tgt_grp".format(
                        unit_data['instance_id']))
+
+    if unmatched_targets:
+        deregister_targets(
+            targets=unmatched_targets,
+            target_group_arn=leader_get('tgt_grp_arn'),
+            region_name=leader_get('aws_region')
+        )
 
     status_set('active', "{} available".format(leader_get('elb_name')))
     clear_flag('endpoint.aws-elb.changed')
