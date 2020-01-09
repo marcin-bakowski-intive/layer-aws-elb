@@ -401,6 +401,8 @@ def remove_all_provisioned_aws_resources():
     leader_set(cert_arn=None)
     leader_set(listener_tls_port=None)
     leader_set(listener_raw_port=None)
+    leader_set(instance_port=None)
+    leader_set(instance_protocol=None)
     leader_set(health_check_endpoint=None)
     leader_set(vpc_id=None)
     leader_set(subnets=None)
