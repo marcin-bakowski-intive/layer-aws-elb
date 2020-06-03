@@ -9,7 +9,10 @@ tags:
   - elb
 subordinate: true
 series:
+  - trusty
+  - xenial
   - bionic
+  - focal
 requires:
   aws:
     interface: "aws-integration"
