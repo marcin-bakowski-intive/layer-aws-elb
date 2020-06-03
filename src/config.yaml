@@ -33,6 +33,6 @@ options:
       accept both TLS and unencrypted traffic.
   instance-protocol:
     type: string
-    default: ""
+    default: HTTP
     description: >-
       The protocol the instances speak: HTTP, TCP, UDP, TCP_UDP.
