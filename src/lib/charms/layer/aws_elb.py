@@ -1,5 +1,14 @@
+import re
+
 import boto3
 import os
+
+from botocore.exceptions import ClientError
+from charmhelpers.core import hookenv
+
+JUJU_MACHINE_SECURITY_GROUP_PATTERN = re.compile(
+    r'^juju-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-\d+$', re.IGNORECASE
+)
 
 
 def aws_resource(service, region_name=None):
@@ -235,6 +244,69 @@ def register_target(target_group_arn, instance_id, region_name):
         TargetGroupArn=target_group_arn,
         Targets=[{'Id': instance_id}]
     )
+
+
+def _find_juju_ec2_security_group_id(instance_id, region_name):
+    ec2_instance = describe_instance(instance_id, region_name)
+    try:
+        return [
+            sg['GroupId'] for sg in ec2_instance['Reservations'][0]['Instances'][0]['SecurityGroups']
+            if JUJU_MACHINE_SECURITY_GROUP_PATTERN.match(sg['GroupName'])
+        ][0]
+    except IndexError:
+        pass
+
+
+def authorize_elb_security_group_ingress(instance_id, instance_port, elb_security_group_id, region_name):
+    juju_ec2_security_group_id = _find_juju_ec2_security_group_id(instance_id, region_name)
+    if juju_ec2_security_group_id:
+        hookenv.log(f'Authorize ingress access from ELB group_id={elb_security_group_id} in '
+                    f'security group_id={juju_ec2_security_group_id} to port={instance_port}')
+        try:
+            return aws('ec2', region_name=region_name).authorize_security_group_ingress(
+                GroupId=juju_ec2_security_group_id,
+                IpPermissions=[
+                    {
+                        'FromPort': instance_port,
+                        'IpProtocol': 'tcp',
+                        'UserIdGroupPairs': [
+                            {
+                                'Description': 'AWS ELB access',
+                                'GroupId': elb_security_group_id,
+                            },
+                        ],
+                        'ToPort': instance_port,
+                    },
+                ],
+            )
+        except ClientError as e:
+            # Ignore duplicates
+            if 'already exists' not in str(e):
+                raise
+    else:
+        hookenv.log(f'Unable to get juju security group for EC2 instance-id={instance_id}')
+
+
+def revoke_security_group_ingress(instance_id, instance_port, elb_security_group_id, region_name):
+    juju_ec2_security_group_id = _find_juju_ec2_security_group_id(instance_id, region_name)
+    if elb_security_group_id:
+        hookenv.log(f'Revoke ingress access from ELB group_id={elb_security_group_id} in '
+                    f'security group_id={juju_ec2_security_group_id} to port={instance_port}')
+        return aws('ec2', region_name=region_name).revoke_security_group_ingress(
+            GroupId=juju_ec2_security_group_id,
+            IpPermissions=[
+                {
+                    'FromPort': instance_port,
+                    'IpProtocol': 'tcp',
+                    'UserIdGroupPairs': [
+                        {
+                            'GroupId': elb_security_group_id,
+                        },
+                    ],
+                    'ToPort': instance_port,
+                },
+            ],
+        )
 
 
 def set_elb_subnets(elb_arn, subnets, region_name):
