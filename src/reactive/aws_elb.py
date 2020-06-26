@@ -21,6 +21,7 @@ from charms.reactive import (
 )
 
 from charms.layer.aws_elb import (
+    authorize_elb_security_group_ingress,
     create_elb,
     create_listener,
     create_target_group,
@@ -38,7 +39,8 @@ from charms.layer.aws_elb import (
     get_health_by_target,
     get_targets,
     get_targets_health,
-    register_target, authorize_elb_security_group_ingress, revoke_security_group_ingress,
+    register_target,
+    revoke_security_group_ingress,
 )
 
 
