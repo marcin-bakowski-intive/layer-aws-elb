@@ -21,6 +21,7 @@ from charms.reactive import (
 )
 
 from charms.layer.aws_elb import (
+    authorize_elb_security_group_ingress,
     create_elb,
     create_listener,
     create_target_group,
@@ -39,6 +40,7 @@ from charms.layer.aws_elb import (
     get_targets,
     get_targets_health,
     register_target,
+    revoke_security_group_ingress,
 )
 
 
@@ -272,12 +274,21 @@ def register_initial_targets():
     endpoint = endpoint_from_flag('endpoint.aws-elb.available')
     units_data = endpoint.list_unit_data()
     status_set('maintenance', "Registering initial targets")
+    security_group_id = leader_get('security_group_id')
+    instance_port = int(leader_get('instance_port'))
     for unit_data in units_data:
         register_target(
            target_group_arn=leader_get('tgt_grp_arn'),
            instance_id=unit_data['instance_id'],
            region_name=leader_get('aws_region')
         )
+        if security_group_id:
+            authorize_elb_security_group_ingress(
+                instance_id=unit_data['instance_id'],
+                instance_port=instance_port,
+                elb_security_group_id=security_group_id,
+                region_name=leader_get('aws_region')
+            )
     status_set('active', "{} available".format(leader_get('elb_name')))
     set_flag('initial.targets.registered')
     update_target_health(endpoint)
@@ -293,6 +304,8 @@ def register_subsequent_targets():
         target_group_arn=leader_get('tgt_grp_arn'),
         region_name=leader_get('aws_region')
     ))
+    security_group_id = leader_get('security_group_id')
+    instance_port = int(leader_get('instance_port'))
 
     for unit_data in units_data:
         register_target(
@@ -300,6 +313,13 @@ def register_subsequent_targets():
            instance_id=unit_data['instance_id'],
            region_name=leader_get('aws_region')
         )
+        if security_group_id:
+            authorize_elb_security_group_ingress(
+                instance_id=unit_data['instance_id'],
+                instance_port=instance_port,
+                elb_security_group_id=security_group_id,
+                region_name=leader_get('aws_region')
+            )
         unmatched_targets.discard(unit_data['instance_id'])
         status_set('active',
                    "Registered {} with tgt_grp".format(
@@ -368,6 +388,7 @@ def remove_all_provisioned_aws_resources():
     elb_arn = leader_get('elb_arn')
     aws_region = leader_get('aws_region')
     security_group_id = leader_get('security_group_id')
+    port = int(leader_get('instance_port'))
 
     targets = get_targets(target_group_arn, aws_region)
 
@@ -391,6 +412,13 @@ def remove_all_provisioned_aws_resources():
     )
 
     if security_group_id:
+        for instance_id in targets:
+            revoke_security_group_ingress(
+                instance_id=instance_id,
+                instance_port=port,
+                elb_security_group_id=security_group_id,
+                region_name=leader_get('aws_region')
+            )
         delete_security_group(security_group_id, aws_region)
 
     # Unset leader values
