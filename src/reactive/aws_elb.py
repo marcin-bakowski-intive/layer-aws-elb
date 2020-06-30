@@ -1,10 +1,12 @@
 import uuid
 from time import sleep
 
+from botocore.exceptions import ClientError, NoCredentialsError
 from charmhelpers.core import unitdata
 from charmhelpers.core.hookenv import (
     atexit,
     config,
+    log,
     status_set,
 )
 
@@ -86,6 +88,20 @@ def request_aws_enablement():
     cloud.enable_network_management()
     status_set('maintenance', 'Waiting for units to join')
     set_flag('aws-elb.cloud.request-sent')
+
+
+@when('endpoint.aws.joined', 'aws-elb.cloud.request-sent')
+@when_not('endpoint.aws.ready')
+def is_unit_already_granted():
+    cloud = endpoint_from_flag('endpoint.aws.joined')
+    try:
+        if cloud.instance_id and cloud.region:
+            describe_instance(cloud.instance_id, cloud.region)
+            set_flag('endpoint.aws.ready')
+            clear_flag('endpoint.aws.changed')
+            log(f'Describe instance command successfull. Required AWS polices were already granted to {cloud.instance_id}')
+    except (ClientError, NoCredentialsError):
+        log('Unit is still not ready')
 
 
 @when('leadership.is_leader',
